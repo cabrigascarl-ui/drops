@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.npm-cache/
+.geo-source/
+.qa/
+.sites-checkout/
+.firebase/
+.openai/
+.env
+.env.*
+!.env.example
+.DS_Store
