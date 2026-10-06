@@ -9,7 +9,7 @@ import {validateUser,needsMunicipality,roleLabel} from '../services/userService.
 import {seedOperations,validateZone,validateRoute,validateRequest,validateWorkOrder,REQUEST_STATUSES,REQUEST_TYPES,WORK_STATUSES} from '../services/operationsService.js'
 import {ROLES,canOperate} from '../config/permissions.js'
 import {DEFAULT_THRESHOLDS,classify,levelOf,validateThresholds} from '../services/consumptionService.js'
-import {REPORT_STATUS,canTransition,currentPeriod,draftReport,isBillable,isLocked,periodLabel} from '../services/reportService.js'
+import {REPORT_STATUS,canTransition,currentPeriod,draftReport,isBillable,isLocked,periodLabel,reportId} from '../services/reportService.js'
 import {auditEntry} from '../services/auditService.js'
 import {useSamarAreas} from '../hooks/useSamarAreas.js'
 import {generatedConsumers} from '../data/samar-lgus.js'
@@ -23,14 +23,30 @@ const seedActivities=()=>[{id:'ac1',title:'New meter reading synced',detail:'Brg
 const fresh=()=>({...seedOperations(),users:baseUsers(),consumers:[...seedConsumers,...generatedConsumers],tariffs:seedTariffs,readings:seedReadings,bills:seedBills,payments:seedPayments,alerts:seedAlerts,settings:{...seedSettings,thresholds:DEFAULT_THRESHOLDS},mapStatuses:{},activities:seedActivities(),reports:seedReports,audit:seedAudit,lastSync:null})
 const load=(stored=storageService.load())=>{
   const initial=fresh()
+  const source=stored&&typeof stored==='object'&&!Array.isArray(stored)?stored:{}
+  const list=(key)=>{
+    const value=source[key]
+    const entries=Array.isArray(value)?value:value&&typeof value==='object'?Object.values(value):initial[key]
+    return entries.filter(item=>item&&typeof item==='object'&&!Array.isArray(item))
+  }
+  const settings=source.settings&&typeof source.settings==='object'&&!Array.isArray(source.settings)?source.settings:{}
+  const thresholds=settings.thresholds&&typeof settings.thresholds==='object'&&!Array.isArray(settings.thresholds)?settings.thresholds:{}
   const legacyBarangays=['San Isidro','Poblacion','Mercedes','Rizal','San Isidro','Guindapunan']
   const renamedLocalities={'Catarman (Capital)':'Catarman','Lope De Vega':'Lope de Vega','General Macarthur':'General MacArthur'}
-  const consumers=stored.consumers?.map(consumer=>{
+  const consumers=list('consumers').map(consumer=>{
     const seed=seedConsumers.find(item=>item.id===consumer.id)
     const index=Number(consumer.id?.slice(1))-1
     return {...consumer,province:consumer.province||seed?.province||'Samar Province',locality:renamedLocalities[consumer.locality]||consumer.locality||seed?.locality||'Catbalogan City',barangay:!consumer.locality&&seed&&consumer.barangay===legacyBarangays[index%6]?seed.barangay:consumer.barangay}
-  })||seedConsumers
-  const loaded={...initial,...stored,settings:{...initial.settings,...stored.settings,thresholds:{...DEFAULT_THRESHOLDS,...stored.settings?.thresholds}},reports:stored.reports||initial.reports,audit:stored.audit||initial.audit,consumers:[...consumers,...generatedConsumers.filter(g=>!consumers.some(c=>c.id===g.id))]}
+  })
+  const reports=list('reports').filter(report=>typeof report.municipality==='string'&&report.municipality&&typeof report.period==='string'&&/^\d{4}-(0[1-9]|1[0-2])$/.test(report.period)).map(report=>({
+    ...report,
+    id:report.id||reportId(report.municipality,report.period),
+    status:REPORT_STATUS[report.status]?report.status:'DRAFT',
+    history:Array.isArray(report.history)?report.history.filter(Boolean):[],
+    revisions:Array.isArray(report.revisions)?report.revisions.filter(Boolean):[]
+  }))
+  const collections=Object.fromEntries(['users','tariffs','readings','bills','payments','alerts','activities','audit','zones','routes','serviceRequests','workOrders'].map(key=>[key,list(key)]))
+  const loaded={...initial,...source,...collections,settings:{...initial.settings,...settings,thresholds:{...DEFAULT_THRESHOLDS,...thresholds}},reports,consumers:[...consumers,...generatedConsumers.filter(g=>!consumers.some(c=>c.id===g.id))]}
   // Current-period submissions without a snapshot get one, so the province trend has data to draw.
   return {...loaded,reports:loaded.reports.map(r=>r.snapshot||!['SUBMITTED','APPROVED'].includes(r.status)||r.period!==currentPeriod()?r:{...r,snapshot:snapshotOf(municipalityStats(loaded,r.municipality,r.period))})}
 }

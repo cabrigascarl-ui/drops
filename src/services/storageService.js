@@ -4,7 +4,10 @@ const STORAGE_KEY = 'tubigbase-data'
 
 export const storageService = {
   load() {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') }
+    try {
+      const value=JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
+      return value&&typeof value==='object'&&!Array.isArray(value)?value:{}
+    }
     catch { return {} }
   },
   save(data) {
